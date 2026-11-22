@@ -628,6 +628,7 @@ export default function App() {
               publicProfiles={publicProfiles}
               pendingInviteTarget={pendingInviteTarget}
               quickMatchTrigger={quickMatchTrigger}
+              onQuickMatchConsumed={() => setQuickMatchTrigger(0)}
               lastRatingDelta={lastRatingDelta}
               onClearPendingInviteTarget={() => setPendingInviteTarget(null)}
               onSendGameInvite={async (toUid, toName, roomCode, tc) => {

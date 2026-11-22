@@ -23,6 +23,11 @@ interface SearchOptions {
   movetimeMs?: number;
   multiPv?: number;
   skillLevel?: number;
+  /**
+   * Checked when the task reaches the front of the queue. If it returns true the search is
+   * skipped (resolves with no lines), so superseded requests don't pile up behind each other.
+   */
+  isCancelled?: () => boolean;
 }
 
 type QueuedTask = {
@@ -124,6 +129,9 @@ class StockfishEngineService {
     opts: SearchOptions = {}
   ): Promise<EngineEvalResult> {
     return this.enqueue(async () => {
+      if (opts.isCancelled?.()) {
+        return { fen, depth: 0, bestMoveUci: '', lines: [] };
+      }
       await this.ensureWorker();
       const worker = this.worker!;
       const sideToMove = fen.split(' ')[1] === 'b' ? -1 : 1;
@@ -231,8 +239,11 @@ class StockfishEngineService {
       return { moveUci: res.bestMoveUci, evalCp: 0 };
     }
 
-    // Style & skill-calibrated candidate selection
+    // Stockfish applies its "Skill Level" weakening to the final `bestmove`, NOT to the
+    // reported PV lines (those always show the true best line). So the engine's own
+    // bestmove is the baseline; only override it for style or beginner randomness.
     let chosen = res.lines[0];
+    let moveUci = res.bestMoveUci || chosen.bestMoveUci;
     if (res.lines.length > 1) {
       const turnMultiplier = fen.split(' ')[1] === 'b' ? -1 : 1;
       const topScore = res.lines[0].cp * turnMultiplier;
@@ -242,17 +253,40 @@ class StockfishEngineService {
         const sharpCandidate = res.lines.find(
           (l, idx) => idx > 0 && topScore - l.cp * turnMultiplier <= 35 && l.pvSan[0]?.includes('x')
         );
-        if (sharpCandidate) chosen = sharpCandidate;
+        if (sharpCandidate) {
+          chosen = sharpCandidate;
+          moveUci = sharpCandidate.bestMoveUci || moveUci;
+        }
+      } else if (opts.style === 'solid') {
+        // Prefer a quiet (non-capturing, non-checking) move that is within ~25cp of the best
+        const quietCandidate = res.lines.find(
+          (l, idx) =>
+            idx > 0 &&
+            topScore - l.cp * turnMultiplier <= 25 &&
+            l.pvSan[0] &&
+            !l.pvSan[0].includes('x') &&
+            !l.pvSan[0].includes('+')
+        );
+        const topSan = res.lines[0].pvSan[0] || '';
+        if (quietCandidate && (topSan.includes('x') || topSan.includes('+'))) {
+          chosen = quietCandidate;
+          moveUci = quietCandidate.bestMoveUci || moveUci;
+        }
       } else if (opts.skillLevel <= 4 && res.lines.length >= 2) {
         // Beginner/Easy occasionally picks 2nd or 3rd engine line within reasonable tolerance
         const roll = Math.random();
-        if (roll < 0.35 && res.lines[1]) chosen = res.lines[1];
-        else if (roll < 0.5 && res.lines[2] && opts.skillLevel <= 2) chosen = res.lines[2];
+        if (roll < 0.35 && res.lines[1]) {
+          chosen = res.lines[1];
+          moveUci = chosen.bestMoveUci || moveUci;
+        } else if (roll < 0.5 && res.lines[2] && opts.skillLevel <= 2) {
+          chosen = res.lines[2];
+          moveUci = chosen.bestMoveUci || moveUci;
+        }
       }
     }
 
     return {
-      moveUci: chosen.bestMoveUci || res.bestMoveUci,
+      moveUci,
       evalCp: chosen.cp,
     };
   }
@@ -266,6 +300,8 @@ class StockfishEngineService {
     this.ready = false;
     this.initializing = null;
     this.queue = [];
+    // A fresh worker starts at full strength, so forget the old skill value.
+    this.currentSkill = 20;
   }
 }
 

@@ -118,6 +118,8 @@ interface MultiplayerViewProps {
   publicProfiles: PublicProfileRecord[];
   pendingInviteTarget: { uid: string; name: string } | null;
   quickMatchTrigger?: number;
+  /** Called once a Quick Match request has been sent, so the parent can clear the trigger. */
+  onQuickMatchConsumed?: () => void;
   lastRatingDelta?: { category: string; delta: number; newRating: number } | null;
   onClearPendingInviteTarget: () => void;
   onSendGameInvite: (
@@ -154,6 +156,7 @@ export const MultiplayerView: React.FC<MultiplayerViewProps> = ({
   publicProfiles,
   pendingInviteTarget,
   quickMatchTrigger = 0,
+  onQuickMatchConsumed,
   lastRatingDelta,
   onClearPendingInviteTarget,
   onSendGameInvite,
@@ -336,6 +339,9 @@ export const MultiplayerView: React.FC<MultiplayerViewProps> = ({
           incrementMs: tcChoice.inc,
         })
       );
+      // Clear the parent's trigger so later visits to this view don't auto-queue again.
+      handledTriggerRef.current = 0;
+      onQuickMatchConsumed?.();
     }
   }, [quickMatchTrigger, connected, activeRoom, searchingQueue, playerName, activeCategoryRating, tcChoice]);
 

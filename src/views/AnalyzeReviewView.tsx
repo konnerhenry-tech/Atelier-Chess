@@ -152,6 +152,7 @@ export const AnalyzeReviewView: React.FC<AnalyzeReviewViewProps> = ({
           movetimeMs: 900,
           multiPv: 3,
           skillLevel: 20,
+          isCancelled: () => cancelled,
         });
         if (!cancelled) {
           setEngineLines(res.lines);

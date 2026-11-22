@@ -1,0 +1,460 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private authenticated player profile, ratings, repertoire, presets, and game history synchronized across devices.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Private Google account email address (PII, owner-only).",
+          "maxLength": 256
+        },
+        "username": {
+          "type": "string",
+          "description": "Display handle shown in chess matches and leaderboards.",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Avatar image URL, local asset path, or compressed data URI (max 32KB).",
+          "maxLength": 32768
+        },
+        "skillLevel": {
+          "type": "string",
+          "enum": ["Beginner", "Intermediate", "Advanced"],
+          "description": "Adaptive coaching and training tier.",
+          "maxLength": 20
+        },
+        "xp": {
+          "type": "number",
+          "description": "Total earned academy experience points."
+        },
+        "streakDays": {
+          "type": "number",
+          "description": "Consecutive active training days."
+        },
+        "lastActiveDate": {
+          "type": "string",
+          "description": "ISO calendar date of last activity.",
+          "maxLength": 20
+        },
+        "dailyGoalXp": {
+          "type": "number",
+          "description": "Daily XP target."
+        },
+        "dailyXpEarned": {
+          "type": "number",
+          "description": "XP earned today."
+        },
+        "ratings": {
+          "type": "object",
+          "description": "Glicko-2 ratings map for bullet, blitz, rapid, and classical."
+        },
+        "ratingHistory": {
+          "type": "array",
+          "description": "Recent chronological rating checkpoints (max 40 entries)."
+        },
+        "completedLessons": {
+          "type": "array",
+          "description": "Completed interactive academy lesson IDs (max 100 entries)."
+        },
+        "puzzleStats": {
+          "type": "object",
+          "description": "Tactical puzzle rating, streaks, and weak theme counters."
+        },
+        "achievements": {
+          "type": "array",
+          "description": "Unlocked training and match honors (max 50 entries)."
+        },
+        "games": {
+          "type": "array",
+          "description": "Saved chess game records with PGN and FEN (max 50 entries)."
+        },
+        "repertoire": {
+          "type": "array",
+          "description": "Saved opening repertoire lines and drill metrics (max 100 entries)."
+        },
+        "presets": {
+          "type": "array",
+          "description": "Saved board and piece studio customization presets (max 16 entries)."
+        },
+        "preferences": {
+          "type": "object",
+          "description": "Current chessboard theme, piece set, sound, and animation settings."
+        },
+        "linkedAccounts": {
+          "type": "object",
+          "description": "Connected Chess.com and Lichess external accounts and ratings."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "username",
+        "avatarUrl",
+        "skillLevel",
+        "xp",
+        "streakDays",
+        "lastActiveDate",
+        "dailyGoalXp",
+        "dailyXpEarned",
+        "ratings",
+        "ratingHistory",
+        "completedLessons",
+        "puzzleStats",
+        "achievements",
+        "games",
+        "repertoire",
+        "presets",
+        "preferences",
+        "linkedAccounts",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Public discoverable player profile without PII for global leaderboards and friend search.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID matching document ID.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "description": "Public display name.",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "usernameLower": {
+          "type": "string",
+          "description": "Lowercase display name for search matching.",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Avatar image URL, local asset path, or compressed data URI (max 32KB).",
+          "maxLength": 32768
+        },
+        "skillLevel": {
+          "type": "string",
+          "enum": ["Beginner", "Intermediate", "Advanced"],
+          "description": "Selected skill tier.",
+          "maxLength": 20
+        },
+        "xp": {
+          "type": "number",
+          "description": "Total academy XP."
+        },
+        "blitzRating": {
+          "type": "number",
+          "description": "Current Atelier Glicko-2 blitz rating."
+        },
+        "rapidRating": {
+          "type": "number",
+          "description": "Current Atelier Glicko-2 rapid rating."
+        },
+        "bulletRating": {
+          "type": "number",
+          "description": "Current Atelier Glicko-2 bullet rating."
+        },
+        "classicalRating": {
+          "type": "number",
+          "description": "Current Atelier Glicko-2 classical rating."
+        },
+        "puzzleRating": {
+          "type": "number",
+          "description": "Current puzzle rating."
+        },
+        "totalWins": {
+          "type": "number",
+          "description": "Total rated wins."
+        },
+        "totalGames": {
+          "type": "number",
+          "description": "Total rated games."
+        },
+        "isDiscoverable": {
+          "type": "boolean",
+          "description": "Controls visibility in global leaderboard and player lookup."
+        },
+        "linkedBadge": {
+          "type": "string",
+          "description": "Optional Chess.com or Lichess connected badge summary.",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "uid",
+        "username",
+        "usernameLower",
+        "avatarUrl",
+        "skillLevel",
+        "xp",
+        "blitzRating",
+        "rapidRating",
+        "bulletRating",
+        "classicalRating",
+        "puzzleRating",
+        "totalWins",
+        "totalGames",
+        "isDiscoverable",
+        "linkedBadge",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FriendRequest": {
+      "title": "FriendRequest",
+      "description": "Directed friend request between two registered Atelier Chess players.",
+      "type": "object",
+      "properties": {
+        "fromUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fromName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "fromAvatar": {
+          "type": "string",
+          "maxLength": 32768
+        },
+        "toUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "toName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "toAvatar": {
+          "type": "string",
+          "maxLength": 32768
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined"],
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "fromUid",
+        "fromName",
+        "fromAvatar",
+        "toUid",
+        "toName",
+        "toAvatar",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Confirmed mutual friendship edge created atomically upon accepting a friend request.",
+      "type": "object",
+      "properties": {
+        "userA": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userB": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nameA": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "avatarA": {
+          "type": "string",
+          "maxLength": 32768
+        },
+        "nameB": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "avatarB": {
+          "type": "string",
+          "maxLength": 32768
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Exact two-element array [userA, userB] for member queries."
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userA",
+        "userB",
+        "nameA",
+        "avatarA",
+        "nameB",
+        "avatarB",
+        "memberUids",
+        "requestId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GameInvite": {
+      "title": "GameInvite",
+      "description": "Direct challenge invite carrying a live WebSocket room code to a friend or rival.",
+      "type": "object",
+      "properties": {
+        "fromUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fromName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "fromRating": {
+          "type": "number"
+        },
+        "toUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "toName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "roomCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 12,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "timeControlLabel": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined", "cancelled"],
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "fromUid",
+        "fromName",
+        "fromRating",
+        "toUid",
+        "toName",
+        "roomCode",
+        "timeControlLabel",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-isolated private user profiles and cross-device progression."
+    },
+    "/publicProfiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Publicly discoverable ratings and usernames without PII."
+    },
+    "/friendRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/FriendRequest" },
+      "description": "Pending and resolved friend requests between players."
+    },
+    "/friendships/{friendshipId}": {
+      "schema": { "$ref": "#/entities/Friendship" },
+      "description": "Mutual friendships created atomically with accepted friend requests."
+    },
+    "/gameInvites/{inviteId}": {
+      "schema": { "$ref": "#/entities/GameInvite" },
+      "description": "Persistent match invitations linking players to live WebSocket game rooms."
+    }
+  }
+}

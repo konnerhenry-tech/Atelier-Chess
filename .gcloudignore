@@ -1,0 +1,13 @@
+.git/
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.DS_Store
+.env*
+!.env.example
+security_spec.md
+DRAFT_firestore.rules
+firestore.rules.test.ts
+eslint.config.mjs

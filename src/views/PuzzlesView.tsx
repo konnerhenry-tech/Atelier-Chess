@@ -109,12 +109,16 @@ export const PuzzlesView: React.FC<PuzzlesViewProps> = ({
       const uci = `${m.from}${m.to}${m.promotion || ''}`;
       const expected = activePuzzle.solutionUci[solutionStep];
 
-      if (uci === expected) {
+      // Any checkmating move solves the puzzle, even if it differs from the stored line
+      // (puzzles often have more than one valid mate).
+      const deliversMate = c.isCheckmate();
+
+      if (uci === expected || deliversMate) {
         soundEngine.play(m.captured ? 'capture' : 'move');
         const nextIdx = solutionStep + 1;
         setHintArrow([]);
 
-        if (nextIdx >= activePuzzle.solutionUci.length) {
+        if (deliversMate || nextIdx >= activePuzzle.solutionUci.length) {
           setFen(c.fen());
           setStatus('solved');
           setMessage(activePuzzle.explanation);

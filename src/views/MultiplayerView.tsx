@@ -118,6 +118,8 @@ interface MultiplayerViewProps {
   publicProfiles: PublicProfileRecord[];
   pendingInviteTarget: { uid: string; name: string } | null;
   quickMatchTrigger?: number;
+  /** Called once a Quick Match request has been sent, so the parent can clear the trigger. */
+  onQuickMatchConsumed?: () => void;
   lastRatingDelta?: { category: string; delta: number; newRating: number } | null;
   onClearPendingInviteTarget: () => void;
   onSendGameInvite: (
@@ -154,6 +156,7 @@ export const MultiplayerView: React.FC<MultiplayerViewProps> = ({
   publicProfiles,
   pendingInviteTarget,
   quickMatchTrigger = 0,
+  onQuickMatchConsumed,
   lastRatingDelta,
   onClearPendingInviteTarget,
   onSendGameInvite,
@@ -205,7 +208,15 @@ export const MultiplayerView: React.FC<MultiplayerViewProps> = ({
 
   useEffect(() => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+    let resume = '';
+    try {
+      resume = sessionStorage.getItem('atelier_resume') || '';
+    } catch {
+      // storage unavailable: start a fresh session
+    }
+    const ws = new WebSocket(
+      `${proto}//${window.location.host}/ws${resume ? `?resume=${encodeURIComponent(resume)}` : ''}`
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -231,6 +242,13 @@ export const MultiplayerView: React.FC<MultiplayerViewProps> = ({
         const msg = JSON.parse(event.data);
         if (msg.type === 'session:init') {
           setClientId(msg.clientId);
+          if (typeof msg.resumeToken === 'string') {
+            try {
+              sessionStorage.setItem('atelier_resume', msg.resumeToken);
+            } catch {
+              // ignore
+            }
+          }
         } else if (msg.type === 'lobby:update') {
           setRooms(msg.rooms || []);
           setTournaments(msg.tournaments || []);
@@ -336,6 +354,9 @@ export const MultiplayerView: React.FC<MultiplayerViewProps> = ({
           incrementMs: tcChoice.inc,
         })
       );
+      // Clear the parent's trigger so later visits to this view don't auto-queue again.
+      handledTriggerRef.current = 0;
+      onQuickMatchConsumed?.();
     }
   }, [quickMatchTrigger, connected, activeRoom, searchingQueue, playerName, activeCategoryRating, tcChoice]);
 

@@ -143,6 +143,7 @@ export const PlayAIView: React.FC<PlayAIViewProps> = ({
   const [startFen, setStartFen] = useState<string>('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
   const chessRef = useRef(new Chess());
   const finishedRef = useRef(false);
+  const takebackUsedRef = useRef(false);
   const [fen, setFen] = useState(chessRef.current.fen());
   const [moves, setMoves] = useState<MoveRecord[]>([]);
   const [viewPly, setViewPly] = useState<number>(0);
@@ -191,7 +192,8 @@ export const PlayAIView: React.FC<PlayAIViewProps> = ({
           : 'Local Opponent';
       const approxSkillRating =
         tier === 'custom' ? 100 + customSkill * 100 : AI_TIER_RATINGS[tier];
-      const shouldRate = opponentMode === 'ai' && isRatedMatch;
+      // A game where a takeback was used is never rated.
+      const shouldRate = opponentMode === 'ai' && isRatedMatch && !takebackUsedRef.current;
 
       onGameFinished(
         {
@@ -232,6 +234,7 @@ export const PlayAIView: React.FC<PlayAIViewProps> = ({
     (overrideColor?: PieceColor, customFen?: string) => {
       stockfishService.stopCurrent();
       finishedRef.current = false;
+      takebackUsedRef.current = false;
       const chosenColor: PieceColor =
         overrideColor ??
         (playerSidePref === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : playerSidePref);
@@ -272,17 +275,38 @@ export const PlayAIView: React.FC<PlayAIViewProps> = ({
   useEffect(() => {
     if (gameStatus !== 'playing' || selectedTc.category === 'unlimited' || moves.length === 0) return;
 
+    // Subtract real elapsed time, not a fixed step: browsers throttle timers in background
+    // tabs, which made the old fixed-step clock run slow.
+    let last = performance.now();
     const interval = window.setInterval(() => {
+      const now = performance.now();
+      const elapsed = Math.round(now - last);
+      last = now;
       const turn = chessRef.current.turn();
       if (turn === 'w') {
-        setWhiteTimeMs((prev) => Math.max(0, prev - 100));
+        setWhiteTimeMs((prev) => Math.max(0, prev - elapsed));
       } else {
-        setBlackTimeMs((prev) => Math.max(0, prev - 100));
+        setBlackTimeMs((prev) => Math.max(0, prev - elapsed));
       }
     }, 100);
 
     return () => clearInterval(interval);
   }, [gameStatus, selectedTc.category, moves.length]);
+
+  // One low-time warning per game when the player's clock drops under 10s.
+  const lowTimeWarnedRef = useRef(false);
+  useEffect(() => {
+    if (gameStatus !== 'playing' || selectedTc.category === 'unlimited') {
+      lowTimeWarnedRef.current = false;
+      return;
+    }
+    const mine = playerColor === 'w' ? whiteTimeMs : blackTimeMs;
+    if (mine > 10000) lowTimeWarnedRef.current = false;
+    else if (mine > 0 && !lowTimeWarnedRef.current && moves.length > 0) {
+      lowTimeWarnedRef.current = true;
+      soundEngine.play('low-time');
+    }
+  }, [gameStatus, selectedTc.category, playerColor, whiteTimeMs, blackTimeMs, moves.length]);
 
   // Clean timeout detection outside state updater
   useEffect(() => {
@@ -431,6 +455,11 @@ export const PlayAIView: React.FC<PlayAIViewProps> = ({
 
   const handleUndo = () => {
     if (gameStatus !== 'playing' || moves.length === 0 || aiThinking) return;
+    if (opponentMode === 'ai' && isRatedMatch && !takebackUsedRef.current) {
+      takebackUsedRef.current = true;
+      setCopiedNotice('Takeback used — this game will no longer be rated.');
+      setTimeout(() => setCopiedNotice(null), 3500);
+    }
     const pliesToUndo = opponentMode === 'ai' && moves.length >= 2 ? 2 : 1;
     for (let i = 0; i < pliesToUndo; i++) {
       chessRef.current.undo();
@@ -612,7 +641,7 @@ export const PlayAIView: React.FC<PlayAIViewProps> = ({
               <div className="text-xs uppercase tracking-wider opacity-85">Match Complete</div>
               <div className="text-base font-semibold flex flex-wrap items-center gap-2">
                 <span>{resultText}</span>
-                {opponentMode === 'ai' && isRatedMatch && lastRatingDelta && (
+                {opponentMode === 'ai' && isRatedMatch && !takebackUsedRef.current && lastRatingDelta && (
                   <span className="px-2 py-0.5 rounded bg-black/25 font-mono text-xs">
                     Elo {lastRatingDelta.delta >= 0 ? `+${lastRatingDelta.delta}` : lastRatingDelta.delta} →{' '}
                     {lastRatingDelta.newRating}

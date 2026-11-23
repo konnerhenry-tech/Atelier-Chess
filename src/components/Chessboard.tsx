@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Chess, Move, Square } from 'chess.js';
 import { BOARD_THEMES } from '../data/boardThemes';
 import { ChessPieceSvg } from '../data/pieceSets';
@@ -69,6 +69,9 @@ export const Chessboard: React.FC<ChessboardProps> = ({
   onEditorSquareAction,
   disableContextArrows = false,
 }) => {
+  // Unique per board instance so SVG arrowhead ids never collide when several boards
+  // are on the page (a duplicate id makes every board use the first board's marker).
+  const boardUid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const boardRef = useRef<HTMLDivElement>(null);
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -602,7 +605,7 @@ export const Chessboard: React.FC<ChessboardProps> = ({
                   {allArrows.map((arrow, idx) => (
                     <marker
                       key={`marker-${idx}`}
-                      id={`arrowhead-${idx}`}
+                      id={`${boardUid}-arrowhead-${idx}`}
                       markerWidth="4"
                       markerHeight="4"
                       refX="2.4"
@@ -637,7 +640,7 @@ export const Chessboard: React.FC<ChessboardProps> = ({
                       stroke={arrow.color || 'rgba(16, 185, 129, 0.85)'}
                       strokeWidth="13"
                       strokeLinecap="round"
-                      markerEnd={`url(#arrowhead-${idx})`}
+                      markerEnd={`url(#${boardUid}-arrowhead-${idx})`}
                     />
                   );
                 })}

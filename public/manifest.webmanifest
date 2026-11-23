@@ -1,0 +1,10 @@
+{
+  "name": "Atelier Chess",
+  "short_name": "Atelier",
+  "description": "Play, analyze and learn chess with Stockfish and an AI coach.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0D1014",
+  "theme_color": "#0D1014",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

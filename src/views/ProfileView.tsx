@@ -30,6 +30,7 @@ import {
   PublicProfileRecord,
 } from '../services/firestoreSync';
 import { PlayerProfileState } from '../store/useAcademyStore';
+import { resolveAssetUrl } from '../utils/assetUrls';
 import { LinkedChessAccount, SavedGameRecord } from '../types/chess';
 
 interface ProfileViewProps {
@@ -298,7 +299,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               title="Change PFP"
             >
               <img
-                src={profile.avatarUrl}
+                src={resolveAssetUrl(profile.avatarUrl)}
                 alt={profile.username}
                 referrerPolicy="no-referrer"
                 onError={(e) => {
@@ -332,7 +333,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     }`}
                     aria-label={`Select avatar ${idx + 1}`}
                   >
-                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <img src={resolveAssetUrl(url)} alt="" className="w-full h-full object-cover" />
                   </button>
                 ))}
                 <button
@@ -463,7 +464,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   }`}
                   aria-label={`Chess avatar portrait ${idx + 1}`}
                 >
-                  <img src={url} alt={`Chess portrait ${idx + 1}`} className="w-full h-full object-cover" />
+                  <img src={resolveAssetUrl(url)} alt={`Chess portrait ${idx + 1}`} className="w-full h-full object-cover" />
                 </button>
               ))}
             </div>
@@ -881,7 +882,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                             className="flex items-center gap-2 text-left hover:underline cursor-pointer"
                           >
                             <img
-                              src={p.avatarUrl}
+                              src={resolveAssetUrl(p.avatarUrl)}
                               alt={p.username}
                               referrerPolicy="no-referrer"
                               className="w-7 h-7 rounded object-cover"
@@ -977,7 +978,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   >
                     <span className="w-5 font-mono font-bold text-neutral-400">#{idx + 1}</span>
                     <img
-                      src={player.avatarUrl}
+                      src={resolveAssetUrl(player.avatarUrl)}
                       alt={player.username}
                       referrerPolicy="no-referrer"
                       className="w-7 h-7 rounded-lg object-cover"
@@ -1108,7 +1109,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <img
-                  src={selectedFriendProfile.avatarUrl}
+                  src={resolveAssetUrl(selectedFriendProfile.avatarUrl)}
                   alt={selectedFriendProfile.username}
                   referrerPolicy="no-referrer"
                   className="w-14 h-14 rounded-xl object-cover"

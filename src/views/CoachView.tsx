@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 import { AlertCircle, RotateCcw, Send, Sparkles } from 'lucide-react';
 import { Chessboard } from '../components/Chessboard';
 import { BoardPreferences, PieceType } from '../types/chess';
 import { soundEngine } from '../utils/soundEngine';
+import { resolveAssetUrl } from '../utils/assetUrls';
+import { MiniMarkdown } from '../components/MiniMarkdown';
 
 interface CoachViewProps {
   preferences: BoardPreferences;
@@ -50,6 +52,8 @@ export const CoachView: React.FC<CoachViewProps> = ({
   const [pgnContext, setPgnContext] = useState(initialPgn || '');
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
+  const [evalStale, setEvalStale] = useState(false);
+  const feedRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<CoachMessage[]>([
     {
       id: 'welcome',
@@ -63,6 +67,7 @@ export const CoachView: React.FC<CoachViewProps> = ({
       try {
         chess.load(initialFen);
         setFen(chess.fen());
+        setEvalStale(false);
       } catch {
         // ignore invalid FEN
       }
@@ -72,6 +77,11 @@ export const CoachView: React.FC<CoachViewProps> = ({
     }
   }, [initialFen, initialPgn, chess]);
 
+  useEffect(() => {
+    const el = feedRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, loading]);
+
   const handleBoardMove = (from: string, to: string, promotion?: PieceType) => {
     try {
       const m = chess.move({ from, to, promotion });
@@ -79,6 +89,7 @@ export const CoachView: React.FC<CoachViewProps> = ({
       soundEngine.play(m.captured ? 'capture' : 'move');
       setFen(chess.fen());
       setPgnContext(chess.pgn());
+      setEvalStale(true);
       return true;
     } catch {
       return false;
@@ -94,6 +105,10 @@ export const CoachView: React.FC<CoachViewProps> = ({
       role: 'user',
       text: trimmed,
     };
+    const history = messages
+      .filter((m) => m.id !== 'welcome' && (m.role === 'user' || m.role === 'coach'))
+      .slice(-6)
+      .map((m) => ({ role: m.role, text: m.text.slice(0, 1200) }));
     setMessages((prev) => [...prev, userMsg]);
     setQuestion('');
     setLoading(true);
@@ -107,7 +122,8 @@ export const CoachView: React.FC<CoachViewProps> = ({
           fen,
           pgn: pgnContext,
           skillLevel,
-          evalSummary: initialEvalSummary || undefined,
+          evalSummary: evalStale ? undefined : initialEvalSummary || undefined,
+          history,
           mode: 'interactive-coach',
         }),
       });
@@ -163,6 +179,7 @@ export const CoachView: React.FC<CoachViewProps> = ({
                 chess.reset();
                 setFen(chess.fen());
                 setPgnContext('');
+                setEvalStale(true);
               }}
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-xs font-medium cursor-pointer"
             >
@@ -191,7 +208,7 @@ export const CoachView: React.FC<CoachViewProps> = ({
         <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <img
-              src="/src/assets/images/coach_grandmaster_1795303199713.jpg"
+              src={resolveAssetUrl('/src/assets/images/coach_grandmaster_1795303199713.jpg')}
               alt="Grandmaster Chess Coach"
               referrerPolicy="no-referrer"
               className="w-11 h-11 rounded-full object-cover border border-neutral-300 dark:border-neutral-700"
@@ -225,11 +242,11 @@ export const CoachView: React.FC<CoachViewProps> = ({
         </div>
 
         {/* Messages Feed */}
-        <div className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[380px]">
+        <div ref={feedRef} className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[380px]">
           {messages.map((m) => (
             <div
               key={m.id}
-              className={`p-3.5 rounded-xl text-sm leading-relaxed whitespace-pre-wrap ${
+              className={`p-3.5 rounded-xl text-sm leading-relaxed ${
                 m.role === 'user'
                   ? 'bg-emerald-700 text-white ml-8'
                   : m.role === 'error'
@@ -238,7 +255,7 @@ export const CoachView: React.FC<CoachViewProps> = ({
               }`}
             >
               {m.role === 'error' && <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />}
-              <span>{m.text}</span>
+              {m.role === 'coach' ? <MiniMarkdown text={m.text} /> : <span className="whitespace-pre-wrap">{m.text}</span>}
             </div>
           ))}
           {loading && (

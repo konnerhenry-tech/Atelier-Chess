@@ -208,7 +208,30 @@ export async function runStockfishGameReview(
     const matAfter =
       estimateMaterialScore(move.fenAfter, move.color) -
       estimateMaterialScore(move.fenAfter, move.color === 'w' ? 'b' : 'w');
-    const isSacrifice = matAfter <= matBefore - 2 && !move.captured;
+    // A real sacrifice only shows up once the opponent has replied: judge material after
+    // the engine's best reply, not right after the move (which can never be lower than
+    // before unless the move itself loses material, which is the old, unreachable test).
+    let matAfterReply = matAfter;
+    const replyUci = line1?.bestMoveUci || evalAfter.bestMoveUci;
+    if (replyUci && !move.isCheckmate) {
+      try {
+        const replyBoard = new Chess(move.fenAfter);
+        const reply = replyBoard.move({
+          from: replyUci.slice(0, 2),
+          to: replyUci.slice(2, 4),
+          promotion: replyUci.length > 4 ? replyUci[4] : undefined,
+        });
+        if (reply) {
+          const fenReply = replyBoard.fen();
+          matAfterReply =
+            estimateMaterialScore(fenReply, move.color) -
+            estimateMaterialScore(fenReply, move.color === 'w' ? 'b' : 'w');
+        }
+      } catch {
+        // Illegal/garbled engine move: fall back to the immediate material balance.
+      }
+    }
+    const isSacrifice = matAfterReply <= matBefore - 2;
 
     const { classification, explanation } = classifyMove({
       isBook,

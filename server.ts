@@ -3,6 +3,7 @@ import express from 'express';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
+import { randomBytes } from 'crypto';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Chess } from 'chess.js';
@@ -11,8 +12,27 @@ import { GoogleGenAI } from '@google/genai';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = 3000;
+// Hosts like Cloud Run/Render/Railway inject PORT; fall back to 3000 for AI Studio/local.
+const PORT = Number(process.env.PORT) || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
+
+// ---------- Simple in-memory rate limiter for the (public) Gemini coach endpoint ----------
+const coachHits = new Map<string, number[]>();
+function coachRateLimited(key: string, max = 20, windowMs = 10 * 60 * 1000): boolean {
+  const now = Date.now();
+  const recent = (coachHits.get(key) || []).filter((t) => now - t < windowMs);
+  if (recent.length >= max) {
+    coachHits.set(key, recent);
+    return true;
+  }
+  recent.push(now);
+  coachHits.set(key, recent);
+  return false;
+}
+
+// Finished rooms are kept briefly (for post-game chat/results), then removed.
+const finishedSeenAt = new Map<string, number>();
+const FINISHED_ROOM_TTL_MS = 15 * 60 * 1000;
 
 // ---------- Gemini AI Coach Client (Server-Side Only) ----------
 function getGeminiClient(): GoogleGenAI | null {
@@ -417,6 +437,8 @@ function finishGameOnBoardEnd(room: MultiplayerRoom): boolean {
 
 async function startServer() {
   const app = express();
+  // One reverse-proxy hop (Cloud Run etc.) so req.ip is the real client, not the proxy.
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (_req, res) => {
@@ -540,6 +562,13 @@ async function startServer() {
 
   // Server-side Gemini AI Chess Coach
   app.post('/api/coach', async (req, res) => {
+    if (coachRateLimited(req.ip || 'unknown')) {
+      return res.status(429).json({
+        error: 'RATE_LIMITED',
+        message: 'Too many coaching requests. Please wait a few minutes and try again.',
+      });
+    }
+
     const ai = getGeminiClient();
     if (!ai) {
       return res.status(503).json({
@@ -555,6 +584,7 @@ async function startServer() {
       pgn,
       skillLevel = 'Intermediate',
       evalSummary,
+      history,
       mode = 'position',
     } = req.body ?? {};
 
@@ -562,24 +592,47 @@ async function startServer() {
       return res.status(400).json({ error: 'Invalid or missing coaching prompt.' });
     }
 
+    // Never put raw client strings into the system prompt: whitelist skill level and mode.
+    const level: string = ['Beginner', 'Intermediate', 'Advanced'].includes(skillLevel)
+      ? skillLevel
+      : 'Intermediate';
+    const coachMode: string =
+      typeof mode === 'string' && /^[a-z-]{1,32}$/.test(mode) ? mode : 'position';
+
     const cleanFen = typeof fen === 'string' && fen.length < 180 ? fen : 'Standard starting position';
     const cleanPgn = typeof pgn === 'string' && pgn.length < 6000 ? pgn : '';
     const cleanEval = typeof evalSummary === 'string' && evalSummary.length < 1500 ? evalSummary : '';
 
+    // Recent chat turns (sanitized) so follow-up questions have context.
+    const cleanHistory: string = Array.isArray(history)
+      ? history
+          .slice(-6)
+          .filter(
+            (h: unknown): h is { role: string; text: string } =>
+              !!h &&
+              typeof h === 'object' &&
+              ['user', 'coach'].includes((h as { role?: string }).role as string) &&
+              typeof (h as { text?: unknown }).text === 'string'
+          )
+          .map((h) => `${h.role === 'user' ? 'Student' : 'Coach'}: ${h.text.slice(0, 1200)}`)
+          .join('\n')
+      : '';
+
     const systemInstruction = [
       'You are an elite Grandmaster Chess Coach at Atelier Chess Academy.',
-      `Adjust your explanation depth, vocabulary, and strategic analogies strictly for a ${skillLevel} player.`,
+      `Adjust your explanation depth, vocabulary, and strategic analogies strictly for a ${level} player.`,
       'Ground every comment in the exact chess position (FEN), move list (PGN), and Stockfish evaluation provided. Never invent illegal moves or pretend pieces are on squares they do not occupy.',
       'Be encouraging, concrete, and structured: highlight key candidate moves, tactical motifs, pawn structure plans, and one actionable takeaway.',
       'Format cleanly with short paragraphs and bullet points.',
     ].join(' ');
 
     const userPrompt = [
-      `Coaching Mode: ${mode}`,
-      `Player Skill Level: ${skillLevel}`,
+      `Coaching Mode: ${coachMode}`,
+      `Player Skill Level: ${level}`,
       `Current Position (FEN): ${cleanFen}`,
       cleanPgn ? `Moves / PGN:\n${cleanPgn}` : '',
       cleanEval ? `Stockfish Analysis Summary:\n${cleanEval}` : '',
+      cleanHistory ? `Recent conversation (for context only):\n${cleanHistory}` : '',
       `Student Question / Request:\n${question}`,
     ]
       .filter(Boolean)
@@ -598,11 +651,12 @@ async function startServer() {
         response = await callCoachModel('gemini-4-hydrogen');
       } catch (primaryErr: unknown) {
         const msg = primaryErr instanceof Error ? primaryErr.message : '';
-        if (msg.includes('503') || msg.includes('UNAVAILABLE')) {
-          response = await callCoachModel('gemini-3.1-flash-lite');
-        } else {
+        // Fall back on any model-side failure (503, 429, model-not-found...). A 403 means the
+        // key itself is bad, so a second model would fail the same way.
+        if (msg.includes('403') || msg.includes('PERMISSION_DENIED')) {
           throw primaryErr;
         }
+        response = await callCoachModel('gemini-3.1-flash-lite');
       }
 
       const answer = response.text?.trim();
@@ -678,12 +732,43 @@ async function startServer() {
   // ---------- WebSocket Server (/ws) ----------
   const wss = new WebSocketServer({ server, path: '/ws' });
 
-  wss.on('connection', (ws) => {
-    const clientId = `cli_${Math.random().toString(36).slice(2, 10)}`;
+  // Resume tokens are private (never broadcast); clientIds are public (shown in lobby lists).
+  const resumeTokens = new Map<string, string>(); // token -> clientId
+
+  wss.on('connection', (ws, req) => {
+    let clientId = '';
+    let resumeToken = '';
+    try {
+      const tok = new URL(req.url || '', 'http://localhost').searchParams.get('resume') || '';
+      if (/^[A-Za-z0-9_-]{16,64}$/.test(tok) && resumeTokens.has(tok)) {
+        const prior = resumeTokens.get(tok)!;
+        const oldWs = clientSockets.get(prior);
+        if (oldWs && oldWs !== ws) {
+          socketToClientId.delete(oldWs);
+          try { oldWs.close(); } catch { /* ignore */ }
+        }
+        clientId = prior;
+        resumeToken = tok;
+      }
+    } catch {
+      // fall through to a fresh identity
+    }
+    if (!clientId) {
+      clientId = `cli_${Math.random().toString(36).slice(2, 10)}`;
+      resumeToken = randomBytes(18).toString('base64url');
+      resumeTokens.set(resumeToken, clientId);
+    }
     clientSockets.set(clientId, ws);
     socketToClientId.set(ws, clientId);
 
-    ws.send(JSON.stringify({ type: 'session:init', clientId }));
+    ws.send(JSON.stringify({ type: 'session:init', clientId, resumeToken }));
+    const resumedRoomId = clientRoomMap.get(clientId);
+    const resumedRoom = resumedRoomId ? rooms.get(resumedRoomId) : undefined;
+    if (resumedRoom && resumedRoom.status !== 'finished') {
+      if (resumedRoom.white?.clientId === clientId) resumedRoom.white.connected = true;
+      if (resumedRoom.black?.clientId === clientId) resumedRoom.black.connected = true;
+      broadcastRoom(resumedRoom);
+    }
     broadcastLobby();
 
     ws.on('message', (raw) => {
@@ -1037,6 +1122,8 @@ async function startServer() {
         const roomId = String(msg.roomId || clientRoomMap.get(clientId) || '');
         const room = rooms.get(roomId);
         if (!room) return;
+        // Only the two players may decline/withdraw a draw offer.
+        if (room.white?.clientId !== clientId && room.black?.clientId !== clientId) return;
         room.drawOfferBy = null;
         broadcastRoom(room);
         return;
@@ -1046,7 +1133,16 @@ async function startServer() {
         const roomId = String(msg.roomId || clientRoomMap.get(clientId) || '');
         const room = rooms.get(roomId);
         if (!room) return;
-        const sender = String(msg.sender || 'Player').slice(0, 32);
+        // Only people actually in the room may chat, and the display name comes from the
+        // server's record of that connection — not from the (spoofable) client payload.
+        const isWhite = room.white?.clientId === clientId;
+        const isBlack = room.black?.clientId === clientId;
+        if (!isWhite && !isBlack && !room.spectators.has(clientId)) return;
+        const sender = isWhite
+          ? room.white!.name
+          : isBlack
+            ? room.black!.name
+            : onlinePlayers.get(clientId)?.name || 'Spectator';
         const text = String(msg.text || '').trim().slice(0, 240);
         if (!text) return;
         room.chat.push({
@@ -1095,6 +1191,7 @@ async function startServer() {
     ws.on('close', () => {
       const cid = socketToClientId.get(ws);
       socketToClientId.delete(ws);
+      if (cid && clientSockets.get(cid) !== ws) return; // superseded by a resumed connection
       if (cid) {
         removeFromQueue(cid);
         clientSockets.delete(cid);
@@ -1107,7 +1204,19 @@ async function startServer() {
             if (room.black?.clientId === cid) room.black.connected = false;
             room.spectators.delete(cid);
             broadcastRoom(room);
+
+            // Don't leave "ghost" rooms in the lobby when the creator disconnects before
+            // anyone joined.
+            if (room.status === 'waiting' && !room.white?.connected && !room.black?.connected) {
+              rooms.delete(roomId);
+            }
           }
+          // Keep the mapping for live games so a refreshed tab can rejoin; the game clock
+          // keeps running and acts as the grace period.
+          if (!room || room.status !== 'active') clientRoomMap.delete(cid);
+        }
+        if (!clientRoomMap.has(cid)) {
+          for (const [t, c] of resumeTokens) if (c === cid) resumeTokens.delete(t);
         }
         broadcastLobby();
       }
@@ -1118,7 +1227,22 @@ async function startServer() {
   setInterval(() => {
     tryPairMatchmakingQueue();
     const now = Date.now();
+    if (coachHits.size > 5000) coachHits.clear();
     rooms.forEach((room) => {
+      // Garbage-collect finished rooms after a grace period so memory doesn't grow forever.
+      if (room.status === 'finished') {
+        const seen = finishedSeenAt.get(room.id);
+        if (seen === undefined) {
+          finishedSeenAt.set(room.id, now);
+        } else if (now - seen > FINISHED_ROOM_TTL_MS) {
+          rooms.delete(room.id);
+          finishedSeenAt.delete(room.id);
+          clientRoomMap.forEach((rid, cid) => {
+            if (rid === room.id) clientRoomMap.delete(cid);
+          });
+        }
+        return;
+      }
       if (room.status !== 'active') return;
       const elapsed = now - room.lastTickAt;
       const turn = room.chess.turn();

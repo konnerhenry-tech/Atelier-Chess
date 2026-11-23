@@ -149,10 +149,131 @@ function migrateUnplayedLegacyRatings(profile: PlayerProfileState): PlayerProfil
   return profile;
 }
 
+/** localStorage can throw (private mode, quota). Persistence is best-effort. */
+function safeStore(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore
+  }
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+function finiteNum(v: unknown, fallback: number, min = -Infinity, max = Infinity): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : fallback;
+}
+
+function sanitizeRating(v: unknown, fb: GlickoRating): GlickoRating {
+  if (!isRecord(v)) return fb;
+  return {
+    rating: finiteNum(v.rating, fb.rating, 100, 3500),
+    rd: finiteNum(v.rd, fb.rd, 35, 350),
+    volatility: finiteNum(v.volatility, fb.volatility, 0.0001, 1),
+    games: finiteNum(v.games, fb.games, 0, 10000000),
+    wins: finiteNum(v.wins, fb.wins, 0, 10000000),
+    losses: finiteNum(v.losses, fb.losses, 0, 10000000),
+    draws: finiteNum(v.draws, fb.draws, 0, 10000000),
+  };
+}
+
+/**
+ * Coerces untrusted data (localStorage or an imported file) into a well-formed profile.
+ * Every field falls back to its default, so a malformed value can never crash the UI.
+ */
+function sanitizeProfile(raw: unknown): PlayerProfileState | null {
+  if (!isRecord(raw)) return null;
+  const base = defaultProfile();
+  const ratings = isRecord(raw.ratings) ? raw.ratings : {};
+  const stats = isRecord(raw.puzzleStats) ? raw.puzzleStats : {};
+  const strings = (v: unknown, fb: string[], max: number): string[] =>
+    Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string').slice(0, max) : fb;
+
+  const weakThemes: Record<string, number> = {};
+  if (isRecord(stats.weakThemes)) {
+    for (const [k, val] of Object.entries(stats.weakThemes)) {
+      if (typeof val === 'number' && Number.isFinite(val)) weakThemes[k] = val;
+    }
+  }
+
+  const skill =
+    raw.skillLevel === 'Beginner' || raw.skillLevel === 'Intermediate' || raw.skillLevel === 'Advanced'
+      ? raw.skillLevel
+      : base.skillLevel;
+
+  return {
+    username:
+      typeof raw.username === 'string' && raw.username.trim()
+        ? raw.username.trim().slice(0, 28)
+        : base.username,
+    avatarUrl: typeof raw.avatarUrl === 'string' && raw.avatarUrl ? raw.avatarUrl : base.avatarUrl,
+    skillLevel: skill,
+    xp: finiteNum(raw.xp, base.xp, 0, 10000000),
+    streakDays: finiteNum(raw.streakDays, base.streakDays, 0, 10000),
+    lastActiveDate: typeof raw.lastActiveDate === 'string' ? raw.lastActiveDate : base.lastActiveDate,
+    dailyGoalXp: finiteNum(raw.dailyGoalXp, base.dailyGoalXp, 10, 5000),
+    dailyXpEarned: finiteNum(raw.dailyXpEarned, base.dailyXpEarned, 0, 100000),
+    ratings: {
+      bullet: sanitizeRating(ratings.bullet, base.ratings.bullet),
+      blitz: sanitizeRating(ratings.blitz, base.ratings.blitz),
+      rapid: sanitizeRating(ratings.rapid, base.ratings.rapid),
+      classical: sanitizeRating(ratings.classical, base.ratings.classical),
+    },
+    ratingHistory: Array.isArray(raw.ratingHistory)
+      ? (raw.ratingHistory
+          .filter(
+            (h) =>
+              isRecord(h) &&
+              typeof h.date === 'string' &&
+              typeof h.category === 'string' &&
+              typeof h.rating === 'number'
+          )
+          .slice(-40) as PlayerProfileState['ratingHistory'])
+      : base.ratingHistory,
+    completedLessons: strings(raw.completedLessons, base.completedLessons, 100),
+    puzzleStats: {
+      attempted: finiteNum(stats.attempted, base.puzzleStats.attempted, 0, 10000000),
+      solved: finiteNum(stats.solved, base.puzzleStats.solved, 0, 10000000),
+      currentStreak: finiteNum(stats.currentStreak, base.puzzleStats.currentStreak, 0, 10000000),
+      bestStreak: finiteNum(stats.bestStreak, base.puzzleStats.bestStreak, 0, 10000000),
+      puzzleRating: finiteNum(stats.puzzleRating, base.puzzleStats.puzzleRating, 100, 3500),
+      weakThemes,
+    },
+    achievements: strings(raw.achievements, base.achievements, 50),
+    games: Array.isArray(raw.games)
+      ? (raw.games
+          .filter((g) => isRecord(g) && typeof g.id === 'string')
+          .slice(0, 50) as unknown as SavedGameRecord[])
+      : base.games,
+    repertoire: Array.isArray(raw.repertoire)
+      ? (raw.repertoire
+          .filter((r) => isRecord(r) && typeof r.id === 'string' && Array.isArray(r.moves))
+          .slice(0, 100) as unknown as RepertoireLine[])
+      : base.repertoire,
+    presets: Array.isArray(raw.presets)
+      ? (raw.presets
+          .filter((p) => isRecord(p) && typeof p.id === 'string' && isRecord(p.preferences))
+          .slice(0, 16) as unknown as CustomizationPreset[])
+      : base.presets,
+    friends: strings(raw.friends, base.friends, 50),
+    linkedAccounts: isRecord(raw.linkedAccounts)
+      ? (raw.linkedAccounts as PlayerProfileState['linkedAccounts'])
+      : {},
+  };
+}
+
 export function useAcademyStore() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_THEME);
-    return saved !== null ? saved === 'dark' : true;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_THEME);
+      if (saved !== null) return saved === 'dark';
+    } catch {
+      // storage blocked (private mode etc.) — fall through to system preference
+    }
+    return typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      : true;
   });
 
   const [preferences, setPreferences] = useState<BoardPreferences>(() => {
@@ -168,14 +289,10 @@ export function useAcademyStore() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_PROFILE);
       if (saved) {
-        const parsed = JSON.parse(saved) as PlayerProfileState;
+        const clean = sanitizeProfile(JSON.parse(saved)) ?? defaultProfile();
         const today = getTodayIso();
-        const merged = migrateUnplayedLegacyRatings({
-          ...defaultProfile(),
-          ...parsed,
-          linkedAccounts: parsed.linkedAccounts || {},
-        });
-        if (parsed.lastActiveDate !== today) {
+        const merged = migrateUnplayedLegacyRatings(clean);
+        if (clean.lastActiveDate !== today) {
           return {
             ...merged,
             dailyXpEarned: 0,
@@ -205,11 +322,11 @@ export function useAcademyStore() {
     const root = document.documentElement;
     if (darkMode) root.classList.add('dark');
     else root.classList.remove('dark');
-    localStorage.setItem(STORAGE_KEY_THEME, darkMode ? 'dark' : 'light');
+    safeStore(STORAGE_KEY_THEME, darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_PREFS, JSON.stringify(preferences));
+    safeStore(STORAGE_KEY_PREFS, JSON.stringify(preferences));
     soundEngine.configure({
       soundEnabled: preferences.soundEnabled,
       soundVolume: preferences.soundVolume,
@@ -220,7 +337,7 @@ export function useAcademyStore() {
   }, [preferences]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_PROFILE, JSON.stringify(profile));
+    safeStore(STORAGE_KEY_PROFILE, JSON.stringify(profile));
     if (pendingRatingDeltaRef.current) {
       setLastRatingDelta(pendingRatingDeltaRef.current);
       pendingRatingDeltaRef.current = null;
@@ -507,9 +624,18 @@ export function useAcademyStore() {
 
   const importProfileJson = useCallback((raw: string): boolean => {
     try {
-      const parsed = JSON.parse(raw) as Partial<PlayerProfileState>;
-      if (!parsed || typeof parsed.username !== 'string' || !parsed.ratings) return false;
-      setProfile((prev) => ({ ...prev, ...parsed }));
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed) || typeof parsed.username !== 'string' || !isRecord(parsed.ratings)) {
+        return false;
+      }
+      const clean = sanitizeProfile(parsed);
+      if (!clean) return false;
+      // Only overwrite fields the file actually contained; keep the rest of the current profile.
+      const patch: Record<string, unknown> = {};
+      (Object.keys(clean) as (keyof PlayerProfileState)[]).forEach((k) => {
+        if (k in parsed) patch[k] = clean[k];
+      });
+      setProfile((prev) => ({ ...prev, ...(patch as Partial<PlayerProfileState>) }));
       return true;
     } catch {
       return false;

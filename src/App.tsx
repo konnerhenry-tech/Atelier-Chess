@@ -51,6 +51,7 @@ import { PlayAIView } from './views/PlayAIView';
 import { ProfileView } from './views/ProfileView';
 import { PuzzlesView } from './views/PuzzlesView';
 import { StudioView } from './views/StudioView';
+import { resolveAssetUrl } from './utils/assetUrls';
 import { ToolsView } from './views/ToolsView';
 
 const SIDEBAR_ITEMS: { id: AppSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -459,7 +460,7 @@ export default function App() {
               title="Edit profile & change PFP"
             >
               <img
-                src={profile.avatarUrl}
+                src={resolveAssetUrl(profile.avatarUrl)}
                 alt={profile.username}
                 referrerPolicy="no-referrer"
                 onError={(e) => {
@@ -525,7 +526,7 @@ export default function App() {
                   className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-800/70 text-left cursor-pointer"
                 >
                   <img
-                    src={profile.avatarUrl}
+                    src={resolveAssetUrl(profile.avatarUrl)}
                     alt={profile.username}
                     referrerPolicy="no-referrer"
                     onError={(e) => {

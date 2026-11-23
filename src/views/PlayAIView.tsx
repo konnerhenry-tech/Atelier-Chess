@@ -293,6 +293,21 @@ export const PlayAIView: React.FC<PlayAIViewProps> = ({
     return () => clearInterval(interval);
   }, [gameStatus, selectedTc.category, moves.length]);
 
+  // One low-time warning per game when the player's clock drops under 10s.
+  const lowTimeWarnedRef = useRef(false);
+  useEffect(() => {
+    if (gameStatus !== 'playing' || selectedTc.category === 'unlimited') {
+      lowTimeWarnedRef.current = false;
+      return;
+    }
+    const mine = playerColor === 'w' ? whiteTimeMs : blackTimeMs;
+    if (mine > 10000) lowTimeWarnedRef.current = false;
+    else if (mine > 0 && !lowTimeWarnedRef.current && moves.length > 0) {
+      lowTimeWarnedRef.current = true;
+      soundEngine.play('low-time');
+    }
+  }, [gameStatus, selectedTc.category, playerColor, whiteTimeMs, blackTimeMs, moves.length]);
+
   // Clean timeout detection outside state updater
   useEffect(() => {
     if (gameStatus !== 'playing' || selectedTc.category === 'unlimited' || moves.length === 0) return;

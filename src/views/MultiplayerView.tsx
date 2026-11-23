@@ -208,7 +208,15 @@ export const MultiplayerView: React.FC<MultiplayerViewProps> = ({
 
   useEffect(() => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+    let resume = '';
+    try {
+      resume = sessionStorage.getItem('atelier_resume') || '';
+    } catch {
+      // storage unavailable: start a fresh session
+    }
+    const ws = new WebSocket(
+      `${proto}//${window.location.host}/ws${resume ? `?resume=${encodeURIComponent(resume)}` : ''}`
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -234,6 +242,13 @@ export const MultiplayerView: React.FC<MultiplayerViewProps> = ({
         const msg = JSON.parse(event.data);
         if (msg.type === 'session:init') {
           setClientId(msg.clientId);
+          if (typeof msg.resumeToken === 'string') {
+            try {
+              sessionStorage.setItem('atelier_resume', msg.resumeToken);
+            } catch {
+              // ignore
+            }
+          }
         } else if (msg.type === 'lobby:update') {
           setRooms(msg.rooms || []);
           setTournaments(msg.tournaments || []);

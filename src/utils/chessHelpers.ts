@@ -47,14 +47,29 @@ export function computeMaterialFromFen(fen: string): MaterialInfo {
   let whiteMaterial = 0;
   let blackMaterial = 0;
 
+  // A promoted pawn leaves the pawn count short without having been captured. Count the
+  // "extra" pieces of each side (more queens/rooks/bishops/knights than at the start) as
+  // promotions and subtract them from the missing-pawn total.
+  const promotions = (color: PieceColor): number =>
+    (['q', 'r', 'b', 'n'] as PieceType[]).reduce(
+      (sum, pt) => sum + Math.max(0, counts[color][pt] - STARTING_COUNTS[pt]),
+      0
+    );
+
   for (const pt of order) {
     whiteMaterial += counts.w[pt] * PIECE_VALUES[pt];
     blackMaterial += counts.b[pt] * PIECE_VALUES[pt];
 
-    const missingBlack = Math.max(0, STARTING_COUNTS[pt] - counts.b[pt]);
+    const missingBlack =
+      pt === 'p'
+        ? Math.max(0, STARTING_COUNTS.p - counts.b.p - promotions('b'))
+        : Math.max(0, STARTING_COUNTS[pt] - counts.b[pt]);
     for (let i = 0; i < missingBlack; i++) capturedByWhite.push(pt);
 
-    const missingWhite = Math.max(0, STARTING_COUNTS[pt] - counts.w[pt]);
+    const missingWhite =
+      pt === 'p'
+        ? Math.max(0, STARTING_COUNTS.p - counts.w.p - promotions('w'))
+        : Math.max(0, STARTING_COUNTS[pt] - counts.w[pt]);
     for (let i = 0; i < missingWhite; i++) capturedByBlack.push(pt);
   }
 

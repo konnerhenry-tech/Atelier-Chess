@@ -3,6 +3,7 @@ import express from 'express';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
+import { randomBytes } from 'crypto';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Chess } from 'chess.js';
@@ -583,6 +584,7 @@ async function startServer() {
       pgn,
       skillLevel = 'Intermediate',
       evalSummary,
+      history,
       mode = 'position',
     } = req.body ?? {};
 
@@ -601,6 +603,21 @@ async function startServer() {
     const cleanPgn = typeof pgn === 'string' && pgn.length < 6000 ? pgn : '';
     const cleanEval = typeof evalSummary === 'string' && evalSummary.length < 1500 ? evalSummary : '';
 
+    // Recent chat turns (sanitized) so follow-up questions have context.
+    const cleanHistory: string = Array.isArray(history)
+      ? history
+          .slice(-6)
+          .filter(
+            (h: unknown): h is { role: string; text: string } =>
+              !!h &&
+              typeof h === 'object' &&
+              ['user', 'coach'].includes((h as { role?: string }).role as string) &&
+              typeof (h as { text?: unknown }).text === 'string'
+          )
+          .map((h) => `${h.role === 'user' ? 'Student' : 'Coach'}: ${h.text.slice(0, 1200)}`)
+          .join('\n')
+      : '';
+
     const systemInstruction = [
       'You are an elite Grandmaster Chess Coach at Atelier Chess Academy.',
       `Adjust your explanation depth, vocabulary, and strategic analogies strictly for a ${level} player.`,
@@ -615,6 +632,7 @@ async function startServer() {
       `Current Position (FEN): ${cleanFen}`,
       cleanPgn ? `Moves / PGN:\n${cleanPgn}` : '',
       cleanEval ? `Stockfish Analysis Summary:\n${cleanEval}` : '',
+      cleanHistory ? `Recent conversation (for context only):\n${cleanHistory}` : '',
       `Student Question / Request:\n${question}`,
     ]
       .filter(Boolean)
@@ -714,12 +732,43 @@ async function startServer() {
   // ---------- WebSocket Server (/ws) ----------
   const wss = new WebSocketServer({ server, path: '/ws' });
 
-  wss.on('connection', (ws) => {
-    const clientId = `cli_${Math.random().toString(36).slice(2, 10)}`;
+  // Resume tokens are private (never broadcast); clientIds are public (shown in lobby lists).
+  const resumeTokens = new Map<string, string>(); // token -> clientId
+
+  wss.on('connection', (ws, req) => {
+    let clientId = '';
+    let resumeToken = '';
+    try {
+      const tok = new URL(req.url || '', 'http://localhost').searchParams.get('resume') || '';
+      if (/^[A-Za-z0-9_-]{16,64}$/.test(tok) && resumeTokens.has(tok)) {
+        const prior = resumeTokens.get(tok)!;
+        const oldWs = clientSockets.get(prior);
+        if (oldWs && oldWs !== ws) {
+          socketToClientId.delete(oldWs);
+          try { oldWs.close(); } catch { /* ignore */ }
+        }
+        clientId = prior;
+        resumeToken = tok;
+      }
+    } catch {
+      // fall through to a fresh identity
+    }
+    if (!clientId) {
+      clientId = `cli_${Math.random().toString(36).slice(2, 10)}`;
+      resumeToken = randomBytes(18).toString('base64url');
+      resumeTokens.set(resumeToken, clientId);
+    }
     clientSockets.set(clientId, ws);
     socketToClientId.set(ws, clientId);
 
-    ws.send(JSON.stringify({ type: 'session:init', clientId }));
+    ws.send(JSON.stringify({ type: 'session:init', clientId, resumeToken }));
+    const resumedRoomId = clientRoomMap.get(clientId);
+    const resumedRoom = resumedRoomId ? rooms.get(resumedRoomId) : undefined;
+    if (resumedRoom && resumedRoom.status !== 'finished') {
+      if (resumedRoom.white?.clientId === clientId) resumedRoom.white.connected = true;
+      if (resumedRoom.black?.clientId === clientId) resumedRoom.black.connected = true;
+      broadcastRoom(resumedRoom);
+    }
     broadcastLobby();
 
     ws.on('message', (raw) => {
@@ -1142,6 +1191,7 @@ async function startServer() {
     ws.on('close', () => {
       const cid = socketToClientId.get(ws);
       socketToClientId.delete(ws);
+      if (cid && clientSockets.get(cid) !== ws) return; // superseded by a resumed connection
       if (cid) {
         removeFromQueue(cid);
         clientSockets.delete(cid);
@@ -1161,7 +1211,12 @@ async function startServer() {
               rooms.delete(roomId);
             }
           }
-          clientRoomMap.delete(cid);
+          // Keep the mapping for live games so a refreshed tab can rejoin; the game clock
+          // keeps running and acts as the grace period.
+          if (!room || room.status !== 'active') clientRoomMap.delete(cid);
+        }
+        if (!clientRoomMap.has(cid)) {
+          for (const [t, c] of resumeTokens) if (c === cid) resumeTokens.delete(t);
         }
         broadcastLobby();
       }

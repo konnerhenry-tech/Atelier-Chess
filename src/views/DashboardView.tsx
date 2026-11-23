@@ -14,6 +14,7 @@ import {
 import { ACADEMY_LESSONS } from '../data/courses';
 import { PUZZLES_DATABASE } from '../data/puzzles';
 import { PlayerProfileState } from '../store/useAcademyStore';
+import { resolveAssetUrl } from '../utils/assetUrls';
 import { AppSection, SavedGameRecord } from '../types/chess';
 
 interface DashboardViewProps {
@@ -68,14 +69,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 title="Change profile picture"
               >
                 <img
-                  src={profile.avatarUrl}
+                  src={resolveAssetUrl(profile.avatarUrl)}
                   alt={profile.username}
                   referrerPolicy="no-referrer"
                   onError={(e) => {
                     const target = e.currentTarget;
                     const fallback = '/src/assets/images/avatar_tactician_1795303198124.jpg';
-                    if (!target.src.endsWith(fallback)) {
-                      target.src = fallback;
+                    const resolvedFallback = resolveAssetUrl(fallback);
+                    if (!target.src.endsWith(resolvedFallback)) {
+                      target.src = resolvedFallback;
                     }
                   }}
                   className="w-full h-full object-cover"
@@ -136,7 +138,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="lg:col-span-5 relative min-h-[220px] lg:min-h-full bg-neutral-900 overflow-hidden">
           <img
-            src="/src/assets/images/hero_chess_atelier_1795303199561.jpg"
+            src={resolveAssetUrl('/src/assets/images/hero_chess_atelier_1795303199561.jpg')}
             alt="Handcrafted Staunton wooden chess set on inlaid walnut board"
             referrerPolicy="no-referrer"
             className="w-full h-full object-cover"
